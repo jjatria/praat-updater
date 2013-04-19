@@ -11,7 +11,7 @@ use Config;
 #   to a specified account.
 #
 # Written by Jose J. Atria
-# Version 0.2 - In progress
+# Version 0.2-devel
 # Latest revision: May 9th, 2011 @Santiago, CL
 # Send comments and or bugs to jjatria [at] gmail [dot] com
 #
@@ -26,10 +26,10 @@ use Config;
 # - tidy up code
 # - improve cross-platform compatibility
 
-my %opt = ();
+my %OPTIONS = ();
 
 GetOptions (
-  \%opt,
+  \%OPTIONS,
   'config=s',
   'force',
   'help|?',
@@ -42,50 +42,63 @@ GetOptions (
   'yes',
 );
 
-if (defined $opt{help}) {
-  pod2usage(-verbose  => 99,
-            -sections => "NAME|SYNOPSIS|OPTIONS|DESCRIPTION|EXAMPLES|VERSION|AUTHOR|SEE ALSO" );
+if (defined $OPTIONS{help}) {
+  pod2usage(-verbose => 99,
+            -sections => "NAME|SYNOPSIS|OPTIONS|DESCRIPTION|EXAMPLES|VERSION|AUTHOR|SEE ALSO");
 }
 
 # Check operating system
 # Note that there are certain issues with using %Config
 # as stated in http://perldoc.perl.org/perlport.html
-my $architecture = 'uname -m';
-open CMD, "$architecture 2>&1 |"
-  or die("Could not execute $architecture: $!");
-chomp($architecture = <CMD>);
+my $OSNAME = $Config{osname};
+my $ARCHITECTURE = "uname -m";
+open CMD, "$ARCHITECTURE 2>&1 |"
+  or die("Could not execute $ARCHITECTURE: $!");
+chomp($ARCHITECTURE = <CMD>);
 close CMD;
 # Path to config file
-my $config_file = (defined $opt{config}) ? $opt{config} : "$ENV{HOME}/.email.conf";
+my $CONFIG = defined $OPTIONS{config} ? $OPTIONS{config} : "$ENV{HOME}/.email.conf";
 # Paths from environment
-my @envpaths = split(":", $ENV{PATH});
+my @ENVPATHS = split(":", $ENV{PATH});
 # Path to output file
-my $trackfile = "$ENV{HOME}/.oldpraatver";
+my $TRACKFILE = "$ENV{HOME}/.oldpraatver";
 # URL to access current praat version
-my $version_url = "http://www.fon.hum.uva.nl/praat/manual/What_s_new_.html";
+my $VERSIONURL = "http://www.fon.hum.uva.nl/praat/manual/What_s_new_.html";
 # Regex to check for praat version numbers
-my $version_regex = "(?'full'([0-9])\.([0-9])(?:\.([0-9]{1,2}))?)";
+my $VERSIONREGEX = "(?'full'([0-9])\.([0-9])(?:\.([0-9]{1,2}))?)";
 # Regex to check for valid emails, as described in
 # http://www.regular-expressions.info/email.html
-my $email_regex = '[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,4}';
+my $EMAILREGEX = '[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,4}';
 # Subject for praat update e-mail
-my $mail_subject = 'New version of praat';
+my $MAILSUBJECT = 'New version of praat';
 
-my $downloader = "wget";
-my $html_dump = "lynx";
+my $DOWNLOADER;
+my $HTMLDUMPER;
+if ($OSNAME =~ /linux/i) {
+  # Running under a GNU/Linux flavor
+  $DOWNLOADER = "wget";
+  $HTMLDUMPER = "lynx";
+} elsif ($OSNAME =~ /darwin/i) {
+  # Running under a version of Mac OSX
+  $DOWNLOADER = "curl";
+  $HTMLDUMPER = "/Applications/Lynxlet.app/Contents/Resources/lynx/bin/lynx";
+} else {
+  # Maybe running under Windows?
+}
+print "Operating system detected: $OSNAME\n" if (defined $OPTIONS{verbose});
 
-my $oldversion = (defined $opt{force}) ? "0.0.00" : "" ;
+my $oldversion = (defined $OPTIONS{force}) ? "0.0.00" : "" ;
 
 # Make sure configuration file is available
-if ((defined $opt{'send-notification'}) && (! -e $config_file)) {
-  print STDERR "Configuration file does not exist. Creating at $config_file.default\n";
-  &CreateDefaultConfig($config_file);
+if ((defined $OPTIONS{'send-notification'}) && (! -e $CONFIG)) {
+        print STDERR "Configuration file does not exist. Creating at $CONFIG.default\n";
+  &CreateDefaultConfig($CONFIG);
 }
-print "Configuration file found at $config_file\n" if ((defined $opt{verbose}) && (defined $opt{'send-notification'}));
+print "Configuration file found at $CONFIG\n" if ((defined $OPTIONS{verbose}) && (defined $OPTIONS{'send-notification'}));
 
 my %SETUP;
-if (defined $opt{'send-notification'}) {
-  open(FILE, $config_file)
+if (defined $OPTIONS{'send-notification'}) {
+  open(FILE, $CONFIG)
     or die("Could not open configuration file: $!");
   while (<FILE>) {
     chomp;
@@ -96,20 +109,20 @@ if (defined $opt{'send-notification'}) {
   }
   close FILE;
 }
-print "Read ".keys(%SETUP)." variable(s) from configuration file\n" if ((defined $opt{verbose}) && (defined $opt{'send-notification'}));
+print "Read ".keys(%SETUP)." variable(s) from configuration file\n" if ((defined $OPTIONS{verbose}) && (defined $OPTIONS{'send-notification'}));
 
-if (! -e $trackfile) {
+if (! -e $TRACKFILE) {
   # File does not exist
   &GenerateDefault();
 }
 
-# Attempts to read old version number from $trackfile
+# Attempts to read old version number from $TRACKFILE
 # If unable, generates a default file with
 # null version number 0.0.0 and retries.
 my $a;
-if (! defined $opt{force}) {
+if (! defined $OPTIONS{force}) {
   EVAL: {
-    open(TXT, $trackfile)
+    open(TXT, $TRACKFILE)
       or die("Could not open version track file: $!");
     $a = <TXT>;
     close TXT;
@@ -120,11 +133,11 @@ if (! defined $opt{force}) {
       redo EVAL;
     }
 
-    if ($a =~ /^$version_regex$/) {
+    if ($a =~ /^$VERSIONREGEX$/) {
       $oldversion = $+{full};
     }
 
-    if ((! defined $oldversion) || ($oldversion !~ /^$version_regex$/)) {
+    if ((! defined $oldversion) || ($oldversion !~ /^$VERSIONREGEX$/)) {
       # File is faulty
       &GenerateDefault(2);
       redo EVAL;
@@ -132,19 +145,19 @@ if (! defined $opt{force}) {
   }
 }
 undef $a;
-print "Found tracked version number at $trackfile: $oldversion\n" if (defined $opt{verbose});
-print "Querying server for newest version... " if (defined $opt{verbose});
-my $cmd = "$html_dump -dump $version_url 2>&1 |";
+print "Found tracked version number at $TRACKFILE: $oldversion\n" if (defined $OPTIONS{verbose});
+print "Querying server for newest version... " if (defined $OPTIONS{verbose});
+my $cmd = "$HTMLDUMPER -dump $VERSIONURL 2>&1 |";
 open CMD, "$cmd"
   or die("Could not execute $cmd: $!");
 my @htmldump = <CMD>;
 close CMD;
 
-print "... "  if (defined $opt{verbose});
+print "... "  if (defined $OPTIONS{verbose});
 
 my $newestversion;
 FINDVER: foreach (@htmldump) {
-  $newestversion = $+{full} if $_ =~ /$version_regex/;
+  $newestversion = $+{full} if $_ =~ /$VERSIONREGEX/;
   if (defined $newestversion) {
     last FINDVER;
   }
@@ -155,31 +168,31 @@ if (! defined $newestversion){
   die ("Cannot retrieve current version from server.\nCheck settings or try again later.");
 }
 
-print "done.\nNewest version: $newestversion\n" if (defined $opt{verbose});
+print "done.\nNewest version: $newestversion\n" if (defined $OPTIONS{verbose});
 
 my $check = &CompareVersions($oldversion, $newestversion) if ($newestversion ne "0.0.0");
 
 if ($check > 0) {
-  if (! defined $opt{quiet}) {
+  if (! defined $OPTIONS{quiet}) {
     print "New version number found: $oldversion\t->\t$newestversion\n";
     print "Updating version number... ";
   }
-  open(OUTPUT, ">$trackfile")
+  open(OUTPUT, ">$TRACKFILE")
     or die("Could not create file");
   print OUTPUT $newestversion;
   close(OUTPUT);
-  print "done\n" if (! defined $opt{quiet});
+  print "done\n" if (! defined $OPTIONS{quiet});
 
-  &UpdatePraat if (! defined $opt{'no-update'});
+  &UpdatePraat if (! defined $OPTIONS{'no-update'});
 
-  if (defined $opt{'send-notification'}) {
+  if (defined $OPTIONS{'send-notification'}) {
     my $changes = &WhatsNew(@htmldump, $newestversion);
     my @recipients = &ParseRecipients;
     &SendMail($newestversion, $changes, @recipients);
   }
 } else {
-  print "Already at newest version. No changes needed.\n";
-  #if (defined $opt{verbose});
+        print "Already at newest version. No changes needed.\n";
+  #if (defined $OPTIONS{verbose});
 }
 
 ## Subroutines ##
@@ -192,10 +205,10 @@ sub SendMail {
     $bcc .= ", ";
     $bcc .= join(", ", @_) if (@_);
   }
-  my $subject = $mail_subject;
+  my $subject = $MAILSUBJECT;
   my $body = "praat v.$version is now available.\n\n$changes\n\nYou can download the latest version from http://www.fon.hum.uva.nl/praat/\n";
 
-  print "Mailing new version number...\n" if ((defined $opt{'send-notification'}) && (! defined $opt{quiet}));
+  print "Mailing new version number...\n" if ((defined $OPTIONS{'send-notification'}) && (! defined $OPTIONS{quiet}));
   
   my $cmd = 'sendemail -s smtp.gmail.com:587 -o tls=auto -m "'.$body.'"';
   $cmd .= ' -u "'.$subject.'" -bcc "'.$bcc.'"';
@@ -225,7 +238,7 @@ sub GenerateDefault {
     $msg = "Faulty version record" if ($_[0] > 1);
   }
   print STDERR "$msg. Creating version record... ";
-  open(OUTPUT, ">$trackfile")
+  open(OUTPUT, ">$TRACKFILE")
     or die("Could not create file");
   print OUTPUT "0.0.0";
   close(OUTPUT);
@@ -235,11 +248,11 @@ sub GenerateDefault {
 sub CompareVersions {
   my $old = $_[0];
   my $new = $_[1];
-  $old =~ /$version_regex/;
+  $old =~ /$VERSIONREGEX/;
   my $old1 = $2;
   my $old2 = (defined $3) ? $3 : 0;
   my $old3 = (defined $4) ? $4 : 0;
-  $new =~ /$version_regex/;
+  $new =~ /$VERSIONREGEX/;
   my $new1 = $2;
   my $new2 = (defined $3) ? $3 : 0;
   my $new3 = (defined $4) ? $4 : 0;
@@ -269,9 +282,9 @@ sub WhatsNew {
 
 sub ParseRecipients {
   my @recipients;
-  my @tmp = split(",", $opt{'send-notification'});
+  my @tmp = split(",", $OPTIONS{'send-notification'});
   foreach (@tmp) {
-    push(@recipients, $_) if ($_ =~ /$email_regex/i);
+    push(@recipients, $_) if ($_ =~ /$EMAILREGEX/i);
   }
   return @recipients;
 }
@@ -281,9 +294,9 @@ sub UpdatePraat {
   my $praatfullpath;
   my $cmd;
   my $praaturl;
-  if (defined $opt{path}) {
+  if (defined $OPTIONS{path}) {
     # Check if user given path is a directory, and make sure it is formatted properly
-    chomp($praatpath = $opt{path});
+    chomp($praatpath = $OPTIONS{path});
     if (-d $praatpath) {
       my $check = substr($praatpath, -1);
       if ($check ne '/') {
@@ -297,7 +310,7 @@ sub UpdatePraat {
     }
     # Check if path to praat is in $PATH
     my $pathcheck = 0;
-    foreach (@envpaths) {
+    foreach (@ENVPATHS) {
       $pathcheck = 1 if ($praatpath eq $_.'/');
     }
     if ($pathcheck == 0) {
@@ -306,7 +319,7 @@ sub UpdatePraat {
     }
     # Check if praat exists at the user specified path and offer to create it
     if (! -e $praatfullpath) {
-      print "$praatfullpath does not exist. Would you like to create it? [Y/n] " if (! defined $opt{quiet});
+      print "$praatfullpath does not exist. Would you like to create it? [Y/n] " if (! defined $OPTIONS{quiet});
       my $yes = &InputYN("y");
       exit 0 unless $yes;
     }
@@ -320,41 +333,41 @@ sub UpdatePraat {
     chomp $praatfullpath;
     # If unable to detect it, offer to install it
     if (! defined $praatfullpath) {
-      print "praat does not seem to be installed. Would you like to install it? [Y/n] " if (! defined $opt{quiet});
+      print "praat does not seem to be installed. Would you like to install it? [Y/n] " if (! defined $OPTIONS{quiet});
       my $yes = &InputYN("y");
       # User rejects installation
       unless ($yes) {
-        print "Aborting...\n" if (! defined $opt{quiet});
+        print "Aborting...\n" if (! defined $OPTIONS{quiet});
         exit 0;
       } else {
         # If requested to install it, ask for a proper path to do so
         my $counter = 0;
         # List paths in $PATH as options
-        foreach (@envpaths) {
+        foreach (@ENVPATHS) {
           print "[$counter] $_\n";
           ++$counter;
         }
-        print '['.$counter."] Other\n" if (! defined $opt{quiet});
+        print '['.$counter."] Other\n" if (! defined $OPTIONS{quiet});
         INSTALLCHOICE: {
-          print "Where should I try to install it? [0-$counter] (default=[0]) " if (! defined $opt{quiet});
+          print "Where should I try to install it? [0-$counter] (default=[0]) " if (! defined $OPTIONS{quiet});
           my $installchoice;
-          if (defined $opt{quiet}) {
+          if (defined $OPTIONS{quiet}) {
             $installchoice = "0\n";
           } else {
-            $installchoice = (defined $opt{yes}) ? "0" : <STDIN>;
+            $installchoice = (defined $OPTIONS{yes}) ? "0" : <STDIN>;
             chomp $installchoice;
           }
           $installchoice = 0 if ($installchoice =~ /^$/);
           # If user correctly selects an option, assign that as a path
-          if (($installchoice =~ /^\d$/i) && (($installchoice >= 0) && ($installchoice <= $#envpaths))) {
-            $praatpath = $envpaths[$installchoice];
+          if (($installchoice =~ /^\d$/i) && (($installchoice >= 0) && ($installchoice <= $#ENVPATHS))) {
+            $praatpath = $ENVPATHS[$installchoice];
             # Make sure path is well formatted
             my $check = substr($praatpath, -1);
             if ($check ne '/') {
               $praatpath .= '/';
             } 
             $praatfullpath = $praatpath.'praat';
-          } elsif ($installchoice == $#envpaths+1) {
+          } elsif ($installchoice == $#ENVPATHS+1) {
             # If user opts to input another path, use that one
             print "Please specify the new path for praat: ";
             chomp ($praatpath = <STDIN>);
@@ -365,7 +378,7 @@ sub UpdatePraat {
             }
             # Check if path to praat is in $PATH
             my $pathcheck = 0;
-            foreach (@envpaths) {
+            foreach (@ENVPATHS) {
               $pathcheck = 1 if ($praatpath eq $_.'/');
             }
             if ($pathcheck == 0) {
@@ -373,7 +386,7 @@ sub UpdatePraat {
               my $yes = &InputYN("y");
               # User rejects path that is not in $PATH
               unless ($yes) {
-                print "Aborting...\n" if (! defined $opt{quiet});
+                print "Aborting...\n" if (! defined $OPTIONS{quiet});
                 exit 0;
               }
             }
@@ -400,17 +413,21 @@ sub UpdatePraat {
     exit 1;
   }
 
-  print "Installing in $praatfullpath\n" if (defined $opt{verbose});
-  print "Everything seems to be OK. Proceed with installation? [Y/n] " if (! defined $opt{quiet});
+  print "Installing in $praatfullpath\n" if (defined $OPTIONS{verbose});
+  print "Everything seems to be OK. Proceed with installation? [Y/n] " if (! defined $OPTIONS{quiet});
   my $yes = &InputYN("y");
   exit 0 unless $yes;
 
-  print "Installing...\n" if (! defined $opt{quiet});
+  print "Installing...\n" if (! defined $OPTIONS{quiet});
 
   my $shortversion = $newestversion . "00";
   $shortversion =~ tr/\.//d;
   $shortversion = substr("$shortversion", 0, 4);
 
+  $cmd = "uname -m";
+  open CMD, "$cmd 2>&1 |" or die("Could not execute $cmd: $!");
+  chomp(my $architecture = <CMD>);
+  close CMD;
   if ($architecture eq "i686") {
     $praaturl = 'http://www.fon.hum.uva.nl/praat/praat'.$shortversion.'_linux32.tar.gz';
   } elsif ($architecture eq "x86_64") {
@@ -420,8 +437,8 @@ sub UpdatePraat {
   my $lastslash = rindex($praaturl, "/");
   my $tarballfilename = substr($praaturl, $lastslash+1);
   my $tarballpath;
-  if (defined $opt{keep}) {
-    $tarballpath = $opt{keep};
+  if (defined $OPTIONS{keep}) {
+    $tarballpath = $OPTIONS{keep};
     if (-d $tarballpath) {
       my $check = substr($tarballpath, -1);
       if ($check ne '/') {
@@ -438,32 +455,32 @@ sub UpdatePraat {
 
   my $uselocaltarball = 0;
   if (-e $tarballfullpath) {
-    print "Archive exists at ".$tarballfullpath."\n" if (! defined $opt{quiet});
-    print "Install from local file? [y/N] " if (! defined $opt{quiet});
+    print "Archive exists at ".$tarballfullpath."\n" if (! defined $OPTIONS{quiet});
+    print "Install from local file? [y/N] " if (! defined $OPTIONS{quiet});
     my $no = &InputYN("n");
     if ($no) {
-      print "Replace with fresh archive? [Y/n] " if (! defined $opt{quiet});
+      print "Replace with fresh archive? [Y/n] " if (! defined $OPTIONS{quiet});
       my $yes = &InputYN("y");
       unless ($yes) {
-        print "Aborting...\n" if (! defined $opt{quiet});
+        print "Aborting...\n" if (! defined $OPTIONS{quiet});
         exit 0;
       } else {
         $uselocaltarball = 0;
       }
     } else {
-      $opt{keep} = $tarballpath if (! defined $opt{keep});
+      $OPTIONS{keep} = $tarballpath if (! defined $OPTIONS{keep});
       $uselocaltarball = 1;
     }
   }
 
   if ($uselocaltarball == 0) {
-    print "Downloading from $praaturl...\n" if (defined $opt{verbose});
+    print "Downloading from $praaturl...\n" if (defined $OPTIONS{verbose});
 
     $cmd = "wget $praaturl -O ".$tarballfullpath;
-    $cmd .= " -q" if (! defined $opt{verbose});
+    $cmd .= " -q" if (! defined $OPTIONS{verbose});
     !system $cmd
       or die("Could not execute $cmd: $!");
-    print "Downloaded archive $tarballfilename\n" if (defined $opt{verbose});
+    print "Downloaded archive $tarballfilename\n" if (defined $OPTIONS{verbose});
   }
 
   if (-e $praatfullpath) {
@@ -471,15 +488,15 @@ sub UpdatePraat {
     !system $cmd
       or die("Could not execute $cmd: $!");
   }
-  print "Made a backup of $praatfullpath to $praatfullpath.old\n" if (defined $opt{verbose});
+  print "Made a backup of $praatfullpath to $praatfullpath.old\n" if (defined $OPTIONS{verbose});
 
-  print "Extracting archive... " if (defined $opt{verbose});
+  print "Extracting archive... " if (defined $OPTIONS{verbose});
   $cmd = "tar -zxvf ".$tarballfullpath." -C $praatpath";
   !system $cmd
     or die("Could not execute $cmd: $!");
-  print "done\n" if (defined $opt{verbose});
+  print "done\n" if (defined $OPTIONS{verbose});
 
-  if (! defined $opt{keep}) {
+  if (! defined $OPTIONS{keep}) {
     unlink $tarballfullpath or warn "Could not delete file: $!";
   }
 }
@@ -506,13 +523,13 @@ sub InputNumber {
 sub InputYN {
   my $default = $_[0];
   my $input;
-  if (defined $opt{quiet}) {
-    $input = (defined $opt{yes}) ? "Y" : "N";
+  if (defined $OPTIONS{quiet}) {
+    $input = (defined $OPTIONS{yes}) ? "Y" : "N";
   } else {
-    $input = (defined $opt{yes}) ? "Y" : <STDIN>;
+    $input = (defined $OPTIONS{yes}) ? "Y" : <STDIN>;
     chomp $input;
   }
-  print "$input\n" if ((defined $opt{yes}) && (! defined $opt{quiet}));
+  print "$input\n" if ((defined $OPTIONS{yes}) && (! defined $OPTIONS{quiet}));
   if ($input =~ /^($default|$)/i) {
     return 1;
   } else {
@@ -596,7 +613,7 @@ Without user interaction, replace whatever version of praat is installed in the 
 
 =head1 VERSION
 
-Version 0.1-alpha - May 3rd, 2011
+Version 0.2-devel - May 9th, 2011
 
 =head1 AUTHOR
 
